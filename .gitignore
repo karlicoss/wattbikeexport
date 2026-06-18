@@ -1,0 +1,6 @@
+secrets.json
+wattbike-export/
+WB-HUB-*.json
+__pycache__/
+*.pyc
+
