@@ -1,9 +1,21 @@
 # Wattbike Hub exporter
 
-This repository contains a self-contained
-[PEP 723](https://peps.python.org/pep-0723/) script. `uv` installs `requests`
-from the inline metadata and runs the exporter without a separate virtual
-environment setup step.
+This repository follows the export/DAL split described in
+[Building data liberation infrastructure](https://beepb00p.xyz/exports.html):
+
+- the **export layer** communicates with Wattbike and preserves raw data;
+- the **data access layer (DAL)** works offline and interprets exported data.
+
+The implementation lives under `src/wattbikeexport`:
+
+```text
+src/wattbikeexport/
+  common.py   shared raw archive primitives
+  export.py   authentication, API access, and raw export
+  dal.py      offline access and typed Wattbike bindings
+```
+
+## Exporting
 
 Create `secrets.json`:
 
@@ -14,36 +26,43 @@ Create `secrets.json`:
 }
 ```
 
-Then run:
+Run the exporter:
 
 ```console
-uv run wattbike_export.py
+uv run --extra export -m wattbikeexport.export
 ```
+
+The `export` extra contains the export layer's only dependency, `requests`.
+The DAL has no third-party dependencies.
 
 Useful options:
 
 ```console
-uv run wattbike_export.py --after 2026-01-01
-uv run wattbike_export.py --before 2026-01-01
-uv run wattbike_export.py --metadata-only
-uv run wattbike_export.py --output another-directory
+uv run --extra export -m wattbikeexport.export --after 2026-01-01
+uv run --extra export -m wattbikeexport.export --before 2026-01-01
+uv run --extra export -m wattbikeexport.export \
+  --output exports/2026-06-20
 ```
 
 `--after` is inclusive and `--before` is exclusive. Dates and timestamps use
 ISO 8601 and are converted to UTC.
 
-The archive contains:
+For long-term use, prefer a new timestamped output directory for each run.
+The DAL can combine these snapshots and deduplicate sessions by Wattbike
+session ID.
+
+## Raw archive
+
+The exporter writes:
 
 ```text
 wattbike-export/
-  manifest.json
   profile.json
   profile-objects.json
   sessions.json
   sessions/
     <timestamp>_<session-id>/
       metadata.json
-      revolutions.json
       <files advertised by Wattbike sessionData>
 ```
 
@@ -51,24 +70,57 @@ Files currently advertised by Wattbike include FIT, TCX, WBS, and WBSR.
 The exporter does not assume a fixed extension list, so it also retains lap or
 segment files if Wattbike adds them to `sessionData`.
 
-`revolutions.json` is derived from WBS using the same field selection as
-Wattbike Hub's JSON export. It retains per-revolution power, cadence, speed,
-balance, PES, polar-force, and available heart-rate values while the original
-WBS remains the authoritative source.
+The export layer deliberately does not generate normalized revolution data.
+WBS remains the authoritative raw source, and transformations belong in the
+DAL. Completed downloads are reused. Interrupted downloads remain as `.part`
+files and resume with an HTTP range request.
 
-`profile-objects.json` resolves the performance-state, preferences, and
-statistics objects referenced by the main profile.
+## Offline DAL
 
-Completed downloads are reused. Interrupted downloads remain as `.part` files
-and resume with an HTTP range request on the next run. The manifest records
-the size and SHA-256 digest of each completed file.
-
-Run the offline tests with:
+Inspect and verify an archive without `requests` or network access:
 
 ```console
-uv run wattbike_export.py --help
-uv run --with requests python -m unittest discover -s tests
+uv run -m wattbikeexport.dal --source wattbike-export --verify
+```
+
+Multiple snapshots can be supplied in chronological order. If the same
+session occurs more than once, the last snapshot wins:
+
+```console
+uv run -m wattbikeexport.dal \
+  --source exports/2026-06-01 exports/2026-06-20
+```
+
+Programmatic access from the repository root:
+
+```python
+from wattbikeexport.dal import DAL
+
+dal = DAL(["wattbike-export"])
+
+for session in dal.sessions():
+    print(session.start_time, session.title, session.summary)
+
+    for revolution in session.revolutions():
+        print(revolution.power, revolution.cadence, revolution.pes)
+```
+
+## Verification
+
+```console
+uv run --extra export -m wattbikeexport.export --help
+uv run -m wattbikeexport.dal --source wattbike-export --verify
+.ci/run
+```
+
+Run an individual check through tox:
+
+```console
+uv tool run --with tox-uv tox run -e tests
+uv tool run --with tox-uv tox run -e ruff
+uv tool run --with tox-uv tox run -e mypy
+uv tool run --with tox-uv tox run -e ty
 ```
 
 The API and authentication flow are undocumented and may change. See
-[EXPORT.md](EXPORT.md) for the research and design rationale.
+[EXPORT.md](EXPORT.md) for the research and protocol details.

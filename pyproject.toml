@@ -1,0 +1,56 @@
+# see https://github.com/karlicoss/pymplate for up-to-date reference
+[project]
+dynamic = ["version"]
+name = "wattbikeexport"
+dependencies = [
+]
+requires-python = ">=3.14"
+
+## these are only useful for pypi
+description = "Export/access your Wattbike data"  # shows on project page/in search
+license     = {file = "LICENSE"}
+authors     = [{name = "Dima Gerasimov (@karlicoss)", email = "karlicoss@gmail.com"}]
+maintainers = [{name = "Dima Gerasimov (@karlicoss)", email = "karlicoss@gmail.com"}]
+
+[project.urls]  # pypi will fetch some github stats/link, so somewhat useful
+Homepage = "https://github.com/karlicoss/wattbiikeexport"
+##
+
+
+[project.optional-dependencies]
+export = [
+    "requests",
+]
+
+[dependency-groups]
+testing = [
+    "pytest>=9",  # need version 9 for proper namespace package support
+    "ruff",
+
+    "wattbikeexport[export]",
+]
+typecheck = [
+    "mypy",
+    "lxml", # for mypy html coverage
+    "ty",
+
+    "types-requests",
+
+    { include-group = "testing" },
+]
+
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+# unfortunately have to duplicate project name here atm, see https://github.com/pypa/hatch/issues/1894
+[tool.hatch.build.targets.wheel]
+packages = ["src/wattbikeexport"]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.version.raw-options]
+version_scheme = "python-simplified-semver"
+local_scheme = "dirty-tag"

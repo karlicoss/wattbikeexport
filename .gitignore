@@ -3,4 +3,11 @@ wattbike-export/
 WB-HUB-*.json
 __pycache__/
 *.pyc
-
+.coverage
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+build/
+dist/
+*.egg-info/
