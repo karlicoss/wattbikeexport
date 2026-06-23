@@ -1,5 +1,4 @@
 import json
-import warnings
 from pathlib import Path
 
 from wattbikeexport.common import session_directory_name
@@ -67,7 +66,7 @@ def _make_snapshot(root: Path, *, title: str = "Quick Ride") -> None:
 def test_offline_session_access_and_verification(tmp_path: Path) -> None:
     _make_snapshot(tmp_path)
 
-    dal = DAL([tmp_path])
+    dal = DAL(tmp_path)
     dal.verify()
     [session] = list(dal.sessions())
     revolutions = list(session.revolutions())
@@ -82,18 +81,3 @@ def test_offline_session_access_and_verification(tmp_path: Path) -> None:
     assert revolutions[0].polar_forces == (1, 2, 3)
     assert revolutions[1].pes is None
     assert revolutions[1].polar_forces is None
-
-
-def test_later_snapshot_wins(tmp_path: Path) -> None:
-    first = tmp_path / "first"
-    second = tmp_path / "second"
-    _make_snapshot(first, title="Old title")
-    _make_snapshot(second, title="New title")
-
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        sessions = list(DAL([first, second]).sessions())
-
-    assert len(caught) == 1
-    assert caught[0].category is UserWarning
-    assert [session.title for session in sessions] == ["New title"]

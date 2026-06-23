@@ -56,9 +56,8 @@ uv run --extra export -m wattbikeexport.export \
 `--after` is inclusive and `--before` is exclusive. Dates and timestamps use
 ISO 8601 and are converted to UTC.
 
-For long-term use, prefer a new timestamped output directory for each run.
-The DAL can combine these snapshots and deduplicate sessions by Wattbike
-session ID.
+For incremental updates, reuse the same output directory. Existing session
+metadata is checked for consistency, and completed downloads are reused.
 
 ## Raw archive
 
@@ -92,20 +91,12 @@ Inspect and verify an archive without `requests` or network access:
 uv run -m wattbikeexport.dal --source wattbike-export --verify
 ```
 
-Multiple snapshots can be supplied in chronological order. If the same
-session occurs more than once, the last snapshot wins:
-
-```console
-uv run -m wattbikeexport.dal \
-  --source exports/2026-06-01 exports/2026-06-20
-```
-
 Programmatic access from the repository root:
 
 ```python
 from wattbikeexport.dal import DAL
 
-dal = DAL(["wattbike-export"])
+dal = DAL("wattbike-export")
 
 for session in dal.sessions():
     print(session.start_time, session.title, session.summary)

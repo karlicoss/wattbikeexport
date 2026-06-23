@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import warnings
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -155,35 +154,17 @@ class Session:
 
 
 class DAL:
-    """
-    Offline access to one or more Wattbike export snapshots.
+    """Offline access to one Wattbike export snapshot."""
 
-    If a session occurs in multiple snapshots, the last source passed to the
-    constructor wins.
-    """
-
-    def __init__(self, sources: Sequence[Path | str]) -> None:
-        assert len(sources) > 0
-        self.snapshots = [Snapshot.load(source) for source in sources]
+    def __init__(self, source: Path | str) -> None:
+        self.snapshot = Snapshot.load(source)
 
     def sessions(self) -> Iterator[Session]:
-        by_id: dict[str, Session] = {}
-        for snapshot in self.snapshots:
-            for raw in snapshot.session_records:
-                session = Session(snapshot=snapshot, raw=raw)
-                previous = by_id.get(session.id)
-                if previous is not None and previous.raw != session.raw:
-                    warnings.warn(
-                        f"session {session.id} differs between {previous.snapshot.root} and {snapshot.root}",
-                        stacklevel=2,
-                    )
-                by_id[session.id] = session
-
-        yield from sorted(by_id.values(), key=lambda session: session.start_time)
+        sessions = [Session(snapshot=self.snapshot, raw=raw) for raw in self.snapshot.session_records]
+        yield from sorted(sessions, key=lambda session: session.start_time)
 
     def verify(self) -> None:
-        for snapshot in self.snapshots:
-            snapshot.verify()
+        self.snapshot.verify()
 
 
 def _make_parser() -> argparse.ArgumentParser:
@@ -191,9 +172,8 @@ def _make_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--source",
         type=Path,
-        nargs="+",
         required=True,
-        help="One or more Wattbike export directories or files within them",
+        help="Wattbike export directory or a file within it",
     )
     parser.add_argument(
         "--verify",
@@ -210,7 +190,7 @@ def main() -> None:
         dal.verify()
 
     sessions = list(dal.sessions())
-    print(f"Snapshots: {len(dal.snapshots)}")
+    print(f"Source: {dal.snapshot.root}")
     print(f"Sessions: {len(sessions)}")
     if len(sessions) > 0:
         print(f"Range: {sessions[0].start_time.isoformat()} to {sessions[-1].start_time.isoformat()}")
