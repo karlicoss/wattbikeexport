@@ -1,5 +1,3 @@
-import json
-import tempfile
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -59,20 +57,19 @@ def test_build_session_where() -> None:
     }
 
 
-def test_existing_session_metadata_must_not_change() -> None:
-    with tempfile.TemporaryDirectory() as temporary:
-        path = Path(temporary) / "metadata.json"
-        common.write_json(path, {"objectId": "session"})
+def test_existing_session_metadata_must_not_change(tmp_path: Path) -> None:
+    path = tmp_path / "metadata.json"
+    export._write_json(path, {"objectId": "session"})
 
+    export._assert_unchanged_metadata(
+        path=path,
+        session={"objectId": "session"},
+    )
+    with pytest.raises(AssertionError):
         export._assert_unchanged_metadata(
             path=path,
-            session={"objectId": "session"},
+            session={"objectId": "session", "title": "Changed"},
         )
-        with pytest.raises(AssertionError):
-            export._assert_unchanged_metadata(
-                path=path,
-                session={"objectId": "session", "title": "Changed"},
-            )
 
 
 def test_session_files_are_recursive_and_deduplicated() -> None:
@@ -167,14 +164,6 @@ def test_get_profile_removes_session_token(monkeypatch: pytest.MonkeyPatch) -> N
     assert profile == {"objectId": "user"}
     assert client.user is not None
     assert "sessionToken" not in client.user
-
-
-def test_write_json_is_complete() -> None:
-    with tempfile.TemporaryDirectory() as temporary:
-        path = Path(temporary) / "nested" / "value.json"
-        common.write_json(path, {"value": 1})
-        assert json.loads(path.read_text()) == {"value": 1}
-        assert not path.with_name("value.json.tmp").exists()
 
 
 def test_safe_file_name_rejects_paths() -> None:

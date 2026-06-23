@@ -29,7 +29,9 @@ Create `secrets.json`:
 Run the exporter:
 
 ```console
-uv run --extra export -m wattbikeexport.export
+uv run --extra export -m wattbikeexport.export \
+  --secrets secrets.json \
+  --output exports/2026-06-20
 ```
 
 The `export` extra contains the export layer's only dependency, `requests`.
@@ -38,9 +40,16 @@ The DAL has no third-party dependencies.
 Useful options:
 
 ```console
-uv run --extra export -m wattbikeexport.export --after 2026-01-01
-uv run --extra export -m wattbikeexport.export --before 2026-01-01
 uv run --extra export -m wattbikeexport.export \
+  --secrets secrets.json \
+  --output exports/2026-06-20 \
+  --after 2026-01-01
+uv run --extra export -m wattbikeexport.export \
+  --secrets secrets.json \
+  --output exports/2026-06-20 \
+  --before 2026-01-01
+uv run --extra export -m wattbikeexport.export \
+  --secrets secrets.json \
   --output exports/2026-06-20
 ```
 
@@ -108,7 +117,10 @@ for session in dal.sessions():
 ## Verification
 
 ```console
-uv run --extra export -m wattbikeexport.export --help
+uv run --extra export -m wattbikeexport.export \
+  --secrets secrets.json \
+  --output exports/2026-06-20 \
+  --help
 uv run -m wattbikeexport.dal --source wattbike-export --verify
 .ci/run
 ```
@@ -123,4 +135,5 @@ uv tool run --with tox-uv tox run -e ty
 ```
 
 The API and authentication flow are undocumented and may change. See
-[EXPORT.md](EXPORT.md) for the research and protocol details.
+[docs/research.md](docs/research.md) for research and protocol details, and
+[docs/data_notes.md](docs/data_notes.md) for observed data quirks.

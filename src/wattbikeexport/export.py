@@ -14,11 +14,11 @@ from urllib.parse import parse_qs, quote, urlsplit
 import requests
 
 from .common import (
+    Json,
     JsonObject,
     safe_file_name,
     session_directory_name,
     session_files,
-    write_json,
 )
 
 _API_URL = "https://api.wattbike.com/v2"
@@ -81,6 +81,10 @@ def _assert_unchanged_metadata(*, path: Path, session: JsonObject) -> None:
         return
     existing = json.loads(path.read_text())
     assert existing == session, (path, existing, session)
+
+
+def _write_json(path: Path, value: Json) -> None:
+    path.write_text(json.dumps(value, indent=2, ensure_ascii=False))
 
 
 def _build_session_where(
@@ -341,9 +345,9 @@ def export_account(
         )
 
     output_directory.mkdir(parents=True, exist_ok=True)
-    write_json(output_directory / "profile.json", profile)
-    write_json(output_directory / "profile-objects.json", profile_objects)
-    write_json(output_directory / "sessions.json", sessions)
+    _write_json(output_directory / "profile.json", profile)
+    _write_json(output_directory / "profile-objects.json", profile_objects)
+    _write_json(output_directory / "sessions.json", sessions)
 
     print(f"Found {len(sessions)} sessions", file=sys.stderr)
     for index, session in enumerate(sessions, start=1):
@@ -351,7 +355,8 @@ def export_account(
         metadata_path = session_directory / "metadata.json"
         existing = metadata_path.exists()
         if not existing:
-            write_json(metadata_path, session)
+            session_directory.mkdir(parents=True, exist_ok=True)
+            _write_json(metadata_path, session)
         files = session_files(session)
         status = "existing" if existing else "new"
         print(
@@ -375,14 +380,14 @@ def _make_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--secrets",
         type=Path,
-        default=Path("secrets.json"),
-        help="JSON file containing email and password (default: secrets.json)",
+        required=True,
+        help="JSON file containing email and password",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("wattbike-export"),
-        help="Archive directory (default: wattbike-export)",
+        required=True,
+        help="Archive directory",
     )
     parser.add_argument(
         "--after",
