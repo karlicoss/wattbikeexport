@@ -67,3 +67,30 @@ Conclusion: prefer `metadata.json` / `sessions.json` `startDate.iso` as the
 canonical ride start instant. Treat `.wbs`, `.tcx`, and `WB-HUB-DI-G-*` filename
 timestamps as Europe/London local wall-clock timestamps with an incorrect `Z`
 suffix for checked BST rides.
+
+## Bike summary fields
+
+The bike displays a post-session summary with fields that mostly map to
+`metadata.json` `sessionSummary` values. This was checked against local exports
+in `/data/exports/wattbike`.
+
+| Bike field    | Export status     | Export field / derivation                                      |
+| ---           | ---               | ---                                                            |
+| Duration      | present           | `metadata.json` `sessionSummary.time`                          |
+| Power peak    | present           | `metadata.json` `sessionSummary.powerMax`                      |
+| Power avg     | present           | `metadata.json` `sessionSummary.powerAvg`                      |
+| Power/mass    | derived           | `sessionSummary.powerAvg / userPerformanceState.weight`        |
+| Energy        | present           | `metadata.json` `sessionSummary.energy`                        |
+| Cadence avg   | present           | `metadata.json` `sessionSummary.cadenceAvg`                    |
+| Cadence peak  | present           | `metadata.json` `sessionSummary.cadenceMax`                    |
+| Rev count     | present           | `metadata.json` `sessionSummary.revolutionsCount`              |
+| Speed avg     | present           | `metadata.json` `sessionSummary.speedAvg`                      |
+| Distance      | present           | `metadata.json` `sessionSummary.distance`                      |
+| Force L/R (%) | partially present | `sessionSummary.balanceAvg`; per-revolution `balance` exists   |
+| Fmax angle    | present           | `anglePeakForceLeftAvg` and `anglePeakForceRightAvg`           |
+| HR avg        | not found         | no session HR average field found in JSON exports              |
+| HR peak       | not found         | `userPerformanceState.mhr` is profile max HR, not session peak |
+| Pace avg      | derived           | derive from `sessionSummary.speedAvg`                          |
+| Device Id     | present           | `wattbikeDevice.serialNumber`; `.wbs` top-level `serialNumber` |
+| Sensor id     | not found         | was not found in JSON or FIT string data                       |
+
