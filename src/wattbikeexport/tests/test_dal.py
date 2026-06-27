@@ -5,7 +5,11 @@ from wattbikeexport.common import session_directory_name
 from wattbikeexport.dal import DAL
 
 
-def _make_snapshot(root: Path, *, title: str = "Quick Ride") -> None:
+def _make_snapshot(
+    root: Path,
+    *,
+    title: str = "Quick Ride",
+) -> None:
     session_id = "session-id"
     session = {
         "objectId": session_id,

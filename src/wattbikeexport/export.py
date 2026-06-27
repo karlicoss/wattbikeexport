@@ -87,6 +87,38 @@ def _write_json(path: Path, value: Json) -> None:
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False))
 
 
+def _wbss_time_range(name: str) -> tuple[int, int] | None:
+    match = re.fullmatch(r".+_(\d+)-(\d+)\.wbss", name)
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _has_empty_lap_wbss_quirk(session: JsonObject) -> bool:
+    session_data = session.get("sessionData")
+    if not isinstance(session_data, dict):
+        return False
+    wbss = session_data.get("wbss")
+    if not isinstance(wbss, list) or len(wbss) != 2:
+        return False
+
+    ranges = []
+    for item in wbss:
+        if not isinstance(item, dict):
+            return False
+        name = item.get("name")
+        if not isinstance(name, str):
+            return False
+        time_range = _wbss_time_range(name)
+        if time_range is None:
+            return False
+        ranges.append(time_range)
+
+    empty_ranges = [time_range for time_range in ranges if time_range[0] == time_range[1]]
+    real_ranges = [time_range for time_range in ranges if time_range[0] < time_range[1]]
+    return len(empty_ranges) == 1 and real_ranges == [(0, empty_ranges[0][0])]
+
+
 def _build_session_where(
     *,
     user_id: str,
@@ -285,12 +317,12 @@ class WattbikeClient:
         *,
         source_name: str,
         destination: Path,
-    ) -> None:
+    ) -> bool:
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_name(f"{destination.name}.part")
 
         if destination.exists():
-            return
+            return True
 
         offset = temporary.stat().st_size if temporary.exists() else 0
         headers = dict(self.parse_headers)
@@ -305,6 +337,8 @@ class WattbikeClient:
             stream=True,
             timeout=(30, 120),
         )
+        if response.status_code == 404:
+            return False
 
         # 416 means the saved partial file already reaches the server's EOF.
         if response.status_code == 416:
@@ -320,6 +354,7 @@ class WattbikeClient:
                         output.write(chunk)
 
         temporary.replace(destination)
+        return True
 
 
 def export_account(
@@ -369,10 +404,16 @@ def export_account(
         for _field, source_name in files:
             # Filenames come from Wattbike metadata and must stay in this session.
             destination = session_directory / safe_file_name(source_name)
-            client.download(
+            downloaded = client.download(
                 source_name=source_name,
                 destination=destination,
             )
+            if downloaded is False:
+                assert source_name.endswith(".wbss"), source_name
+                # Wattbike can advertise WBSS for a two-lap session where the
+                # second lap is zero-duration, but not generate either segment.
+                assert _has_empty_lap_wbss_quirk(session), (session["objectId"], source_name)
+                print(f"  missing {source_name} (404; empty-lap WBSS quirk)", file=sys.stderr)
 
 
 def _make_parser() -> argparse.ArgumentParser:

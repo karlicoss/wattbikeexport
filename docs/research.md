@@ -69,7 +69,8 @@ A complete archive should retain:
 - every `RideSession` metadata record as JSON;
 - the generated `.tcx` file;
 - raw `.wbs` session data;
-- `.wbsr` and any `.wbss` lap or segment files named in `sessionData`; and
+- `.wbsr` and any downloadable `.wbss` lap or segment files named in
+  `sessionData`; and
 
 TCX is the portable representation. The WBS-family files should also be kept
 because they contain Wattbike-specific data that TCX may not represent.
