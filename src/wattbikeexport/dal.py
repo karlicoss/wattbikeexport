@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import argparse
-import json
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from hpikit.datetime import AwareDateTime, aware
+from hpikit.json import Json, loads
+
 from .common import (
-    JsonObject,
     safe_file_name,
     session_directory_name,
     session_files,
@@ -30,9 +31,9 @@ def _optional_number(value: str | float | None) -> float | None:
 @dataclass(frozen=True)
 class Snapshot:
     root: Path
-    profile: JsonObject
-    profile_objects: dict[str, JsonObject]
-    session_records: list[JsonObject]
+    profile: Json
+    profile_objects: dict[str, Json]
+    session_records: list[Json]
     source_files: dict[tuple[str, str], Path]
 
     @classmethod
@@ -42,10 +43,10 @@ class Snapshot:
             root = root.parent
         root = root.resolve()
 
-        profile = json.loads((root / "profile.json").read_text())
+        profile = loads((root / "profile.json").read_bytes())
         profile_objects_path = root / "profile-objects.json"
-        profile_objects = json.loads(profile_objects_path.read_text()) if profile_objects_path.exists() else {}
-        session_records = json.loads((root / "sessions.json").read_text())
+        profile_objects = loads(profile_objects_path.read_bytes()) if profile_objects_path.exists() else {}
+        session_records = loads((root / "sessions.json").read_bytes())
         assert isinstance(session_records, list), session_records
 
         source_files = {}
@@ -70,7 +71,7 @@ class Snapshot:
 
 @dataclass(frozen=True)
 class Revolution:
-    raw: JsonObject
+    raw: Json
 
     @property
     def time(self) -> float:
@@ -113,7 +114,7 @@ class Revolution:
 @dataclass(frozen=True)
 class Session:
     snapshot: Snapshot
-    raw: JsonObject
+    raw: Json
 
     @property
     def id(self) -> str:
@@ -128,11 +129,11 @@ class Session:
         return value
 
     @property
-    def start_time(self) -> datetime:
-        return datetime.fromisoformat(self.raw["startDate"]["iso"])
+    def start_time(self) -> AwareDateTime:
+        return aware(datetime.fromisoformat(self.raw["startDate"]["iso"]))
 
     @property
-    def summary(self) -> JsonObject | None:
+    def summary(self) -> Json | None:
         value = self.raw.get("sessionSummary")
         if isinstance(value, dict) and value.get("__type") == "Object":
             return value
@@ -141,8 +142,8 @@ class Session:
     def source_path(self, field: str) -> Path:
         return self.snapshot.source_files[(self.id, field)]
 
-    def source_json(self, field: str) -> JsonObject:
-        value = json.loads(self.source_path(field).read_text())
+    def source_json(self, field: str) -> Json:
+        value = loads(self.source_path(field).read_bytes())
         assert isinstance(value, dict), value
         return value
 
