@@ -3,6 +3,8 @@
 dynamic = ["version"]  # version is managed by build backend
 name = "wattbikeexport"
 dependencies = [
+    "hpikit",
+    "kloggy",
 ]
 requires-python = ">=3.14"
 
@@ -19,8 +21,13 @@ Homepage = "https://github.com/karlicoss/wattbikeexport"
 
 
 [project.optional-dependencies]
+dal = [
+]
 export = [
     "requests",
+]
+optional = [
+    "hpikit[optional]", # faster JSON parsing and transparent compression
 ]
 
 [dependency-groups]
@@ -31,7 +38,7 @@ testing = [
     "pytest",
     "ruff",
 
-    "wattbikeexport[export]",
+    "wattbikeexport[dal,export,optional]",
 ]
 typecheck = [
     "mypy",

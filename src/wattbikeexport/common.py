@@ -2,15 +2,14 @@ from __future__ import annotations
 
 from typing import Any
 
-type Json = Any
-type JsonObject = dict[str, Json]
+from hpikit.json import Json
 
 
-def session_files(session: JsonObject) -> list[tuple[str, str]]:
+def session_files(session: Json) -> list[tuple[str, str]]:
     """Return unique Wattbike file references from nested sessionData."""
     file_references: list[tuple[str, str]] = []
 
-    def walk(value: Json, *, field: str) -> None:
+    def walk(value: Any, *, field: str) -> None:
         if isinstance(value, dict):
             name = value.get("name")
             if isinstance(name, str):
@@ -41,7 +40,7 @@ def safe_file_name(name: str) -> str:
     return name
 
 
-def session_directory_name(session: JsonObject) -> str:
+def session_directory_name(session: Json) -> str:
     """Return a stable, sortable directory name for a Wattbike session."""
     start_date = session["startDate"]["iso"]
     assert isinstance(start_date, str), start_date

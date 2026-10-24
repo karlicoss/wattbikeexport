@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sys
 import time
 from datetime import UTC, datetime
 from html.parser import HTMLParser
@@ -12,14 +11,16 @@ from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
 
 import requests
+from hpikit.json import Json
+from kloggy import get_logger
 
 from .common import (
-    Json,
-    JsonObject,
     safe_file_name,
     session_directory_name,
     session_files,
 )
+
+logger = get_logger(__name__)
 
 _API_URL = "https://api.wattbike.com/v2"
 _AUTH_URL = "https://auth.wattbike.com/login"
@@ -72,18 +73,18 @@ def _parse_datetime(value: str) -> str:
     return parsed.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
-def _date_pointer(value: str) -> JsonObject:
+def _date_pointer(value: str) -> Json:
     return {"__type": "Date", "iso": value}
 
 
-def _assert_unchanged_metadata(*, path: Path, session: JsonObject) -> None:
+def _assert_unchanged_metadata(*, path: Path, session: Json) -> None:
     if not path.exists():
         return
     existing = json.loads(path.read_text())
     assert existing == session, (path, existing, session)
 
 
-def _write_json(path: Path, value: Json) -> None:
+def _write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False))
 
 
@@ -94,7 +95,7 @@ def _wbss_time_range(name: str) -> tuple[int, int] | None:
     return int(match.group(1)), int(match.group(2))
 
 
-def _has_empty_lap_wbss_quirk(session: JsonObject) -> bool:
+def _has_empty_lap_wbss_quirk(session: Json) -> bool:
     session_data = session.get("sessionData")
     if not isinstance(session_data, dict):
         return False
@@ -124,15 +125,15 @@ def _build_session_where(
     user_id: str,
     after: str | None = None,
     before: str | None = None,
-) -> JsonObject:
-    where: JsonObject = {
+) -> Json:
+    where: Json = {
         "user": {
             "__type": "Pointer",
             "className": "_User",
             "objectId": user_id,
         }
     }
-    bounds: JsonObject = {}
+    bounds: Json = {}
     if after is not None:
         bounds["$gte"] = _date_pointer(after)
     if before is not None:
@@ -159,7 +160,7 @@ class WattbikeClient:
             "X-Parse-Application-Id": _APPLICATION_ID,
             "X-Parse-Javascript-Key": _JAVASCRIPT_KEY,
         }
-        self.user: JsonObject | None = None
+        self.user: Json | None = None
 
     def request(
         self,
@@ -229,7 +230,7 @@ class WattbikeClient:
         session_token = exchange_response.json()["token"]
         self.parse_headers["X-Parse-Session-Token"] = session_token
 
-    def get_profile(self) -> JsonObject:
+    def get_profile(self) -> Json:
         profile_response = self.request(
             "GET",
             f"{_API_URL}/users/me",
@@ -247,7 +248,7 @@ class WattbikeClient:
         after: str | None = None,
         before: str | None = None,
         page_size: int = 100,
-    ) -> list[JsonObject]:
+    ) -> list[Json]:
         assert self.user is not None
         assert page_size > 0, page_size
         where = _build_session_where(
@@ -285,7 +286,7 @@ class WattbikeClient:
         assert len(object_ids) == len(set(object_ids)), object_ids
         return sessions
 
-    def get_object(self, pointer: JsonObject) -> JsonObject:
+    def get_object(self, pointer: Json) -> Json:
         assert pointer["__type"] == "Pointer", pointer
         class_name = pointer["className"]
         object_id = pointer["objectId"]
@@ -304,7 +305,7 @@ class WattbikeClient:
         assert isinstance(value, dict), value
         return value
 
-    def get_profile_objects(self) -> dict[str, JsonObject]:
+    def get_profile_objects(self) -> dict[str, Json]:
         assert self.user is not None
         objects = {}
         for field, pointer in self.user.items():
@@ -384,7 +385,7 @@ def export_account(
     _write_json(output_directory / "profile-objects.json", profile_objects)
     _write_json(output_directory / "sessions.json", sessions)
 
-    print(f"Found {len(sessions)} sessions", file=sys.stderr)
+    logger.info(f"Found {len(sessions)} sessions")
     for index, session in enumerate(sessions, start=1):
         session_directory = output_directory / "sessions" / session_directory_name(session)
         metadata_path = session_directory / "metadata.json"
@@ -394,11 +395,10 @@ def export_account(
             _write_json(metadata_path, session)
         files = session_files(session)
         status = "existing" if existing else "new"
-        print(
+        logger.info(
             f"[{index}/{len(sessions)}] {session['startDate']['iso']} "
             f"{session.get('title', 'Untitled')} "
-            f"({status}, {len(files)} files)",
-            file=sys.stderr,
+            f"({status}, {len(files)} files)"
         )
 
         for _field, source_name in files:
@@ -413,7 +413,7 @@ def export_account(
                 # Wattbike can advertise WBSS for a two-lap session where the
                 # second lap is zero-duration, but not generate either segment.
                 assert _has_empty_lap_wbss_quirk(session), (session["objectId"], source_name)
-                print(f"  missing {source_name} (404; empty-lap WBSS quirk)", file=sys.stderr)
+                logger.info(f"missing {source_name} (404; empty-lap WBSS quirk)")
 
 
 def _make_parser() -> argparse.ArgumentParser:
@@ -459,7 +459,7 @@ def main() -> None:
         after=args.after,
         before=args.before,
     )
-    print(f"Archive written to {args.output.resolve()}", file=sys.stderr)
+    logger.info(f"Archive written to {args.output.resolve()}")
 
 
 if __name__ == "__main__":

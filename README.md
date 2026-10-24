@@ -34,8 +34,9 @@ uv run --extra export -m wattbikeexport.export \
   --output exports/2026-06-20
 ```
 
-The `export` extra contains the export layer's only dependency, `requests`.
-The DAL has no third-party dependencies.
+The `export` extra contains the export layer's dependencies, `requests` and `kloggy` for logging.
+The DAL only needs hpikit, which has no required dependencies of its own.
+Its `optional` extra makes parsing faster with msgspec.
 
 Useful options:
 
