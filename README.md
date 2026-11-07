@@ -10,6 +10,7 @@ The implementation lives under `src/wattbikeexport`:
 
 ```text
 src/wattbikeexport/
+  _http.py    HTTP retries and resumable downloads
   common.py   shared raw archive primitives
   export.py   authentication, API access, and raw export
   dal.py      offline access and typed Wattbike bindings

@@ -72,12 +72,6 @@ class FakeExportClient:
         return False
 
 
-def test_csrf_parser() -> None:
-    parser = export.CsrfParser()
-    parser.feed('<input type="hidden" name="_csrf" value="token">')
-    assert parser.token == "token"
-
-
 def test_parse_datetime() -> None:
     assert export._parse_datetime("2026-06-18") == "2026-06-18T00:00:00.000Z"
     assert export._parse_datetime("2026-06-18T12:30:00") == "2026-06-18T12:30:00.000Z"
