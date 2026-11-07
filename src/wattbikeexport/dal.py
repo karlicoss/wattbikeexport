@@ -11,8 +11,9 @@ from hpikit.json import Json, loads
 
 from .common import (
     safe_file_name,
-    session_directory_name,
     session_files,
+    session_metadata,
+    workout_files,
 )
 
 
@@ -46,15 +47,17 @@ class Snapshot:
         profile = loads((root / "profile.json").read_bytes())
         profile_objects_path = root / "profile-objects.json"
         profile_objects = loads(profile_objects_path.read_bytes()) if profile_objects_path.exists() else {}
-        session_records = loads((root / "sessions.json").read_bytes())
-        assert isinstance(session_records, list), session_records
-
+        session_records = []
         source_files = {}
-        for session in session_records:
-            session_root = root / "sessions" / session_directory_name(session)
-            for field, name in session_files(session):
-                key = (session["objectId"], field)
-                source_files[key] = session_root / safe_file_name(name)
+        for session_root, session in session_metadata(root):
+            session_records.append(session)
+            is_v2_api = "objectId" not in session
+            if is_v2_api:
+                for extension, _asset_id, name in workout_files(session):
+                    source_files[(session["id"], f"sessionData.{extension}")] = session_root / name
+            else:
+                for field, name in session_files(session):
+                    source_files[(session["objectId"], field)] = session_root / safe_file_name(name)
 
         return cls(
             root=root,
@@ -118,22 +121,38 @@ class Session:
 
     @property
     def id(self) -> str:
-        value = self.raw["objectId"]
+        is_v2_api = "objectId" not in self.raw
+        value = self.raw["id"] if is_v2_api else self.raw["objectId"]
         assert isinstance(value, str), value
         return value
 
     @property
     def title(self) -> str:
-        value = self.raw.get("title", "Untitled")
+        is_v2_api = "objectId" not in self.raw
+        if is_v2_api:
+            value = self.raw["workoutWb"].get("title")
+            if value is None:
+                value = "Quick Ride"
+        else:
+            value = self.raw.get("title", "Untitled")
         assert isinstance(value, str), value
         return value
 
     @property
     def start_time(self) -> AwareDateTime:
-        return aware(datetime.fromisoformat(self.raw["startDate"]["iso"]))
+        value = self.raw["startDate"]
+        if isinstance(value, dict):
+            value = value["iso"]
+        return aware(datetime.fromisoformat(value))
 
     @property
     def summary(self) -> Json | None:
+        is_v2_api = "objectId" not in self.raw
+        if is_v2_api:
+            summary = dict(self.raw["workoutWb"])
+            if summary.get("time") is None:
+                summary["time"] = self.raw["totalSessionTime"]
+            return summary
         value = self.raw.get("sessionSummary")
         if isinstance(value, dict) and value.get("__type") == "Object":
             return value

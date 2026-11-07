@@ -55,11 +55,15 @@ uv run --extra export -m wattbikeexport.export \
   --output exports/2026-06-20
 ```
 
-`--after` is inclusive and `--before` is exclusive. Dates and timestamps use
-ISO 8601 and are converted to UTC.
+`--after` is inclusive and `--before` is exclusive.
+Dates and timestamps use ISO 8601 and are converted to UTC.
 
-For incremental updates, reuse the same output directory. Existing session
-metadata is checked for consistency, and completed downloads are reused.
+For incremental updates, reuse the same output directory.
+Existing session directories are skipped without changing their files or metadata.
+
+The exporter uses the current Hub at `v2.hub.wattbike.com`.
+It authenticates with OAuth authorization code + PKCE and reads workouts and assets from `v2.api.wattbike.com/v1`.
+The same email and password work after Wattbike's account migration.
 
 ## Raw archive
 
@@ -68,22 +72,37 @@ The exporter writes:
 ```text
 wattbike-export/
   profile.json
-  profile-objects.json
-  sessions.json
+  workouts.json
   sessions/
     <timestamp>_<session-id>/
       metadata.json
-      <files advertised by Wattbike sessionData>
+      <asset-id>.<format>
 ```
 
+Each session's `metadata.json` preserves the raw API response from its first successful export.
+The root `profile.json` and `workouts.json` files refresh on each successful run.
+The DAL reads the per-session metadata, so later server-side edits do not change archived sessions.
+
+`profile.json` is the single current profile, preserving the raw response from the current Hub API.
+Old profiles have a top-level `objectId`; new profiles have `user.id` and link to the old account through `user.wbParseId`.
+When first replacing an old profile, the exporter preserves its exact bytes in `legacy/profile.json`.
+That historical copy is never refreshed or used by the DAL.
+
 Files currently advertised by Wattbike include FIT, TCX, WBS, and WBSR.
-The exporter does not assume a fixed extension list, so it also retains lap or
-segment files if Wattbike adds them to `sessionData`.
+Asset references determine the downloaded formats.
+
+An archive from the old API also has `profile-objects.json`, `sessions.json`, and per-session `metadata.json`.
+These remain intact when the new exporter runs in the same directory.
+A workout whose `legacyId` matches an archived `objectId` is skipped.
+New API workouts are skipped by their UUID once archived.
+The DAL distinguishes the old and new `metadata.json` schemas by their `objectId` or `id` fields.
 
 The export layer deliberately does not generate normalized revolution data.
-WBS remains the authoritative raw source, and transformations belong in the
-DAL. Completed downloads are reused. Interrupted downloads remain as `.part`
-files and resume with an HTTP range request.
+WBS remains the authoritative raw source, and transformations belong in the DAL.
+New sessions download into `.partial/<session-directory>/` outside the completed `sessions/` tree.
+Interrupted downloads remain as `.part` files and resume with an HTTP range request.
+Once all files and `metadata.json` are written, the complete directory is moved into `sessions/`.
+Workouts that the API has not marked complete are deferred to a later run.
 
 ## Offline DAL
 

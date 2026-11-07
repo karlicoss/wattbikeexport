@@ -1,5 +1,7 @@
 # Wattbike data notes
 
+These observations describe files exported from the legacy Parse API.
+
 ## Timestamp oddity
 
 The API metadata and the downloaded source files can disagree about start

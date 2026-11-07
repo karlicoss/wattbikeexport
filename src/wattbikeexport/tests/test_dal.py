@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-from wattbikeexport.common import session_directory_name
 from wattbikeexport.dal import DAL
 
 
@@ -28,8 +27,9 @@ def _make_snapshot(
             "wbsr": {"name": "ride.wbsr"},
         },
     }
-    session_root = root / "sessions" / session_directory_name(session)
+    session_root = root / "sessions" / "20260618T120000Z_session-id"
     session_root.mkdir(parents=True)
+    (session_root / "metadata.json").write_text(json.dumps(session))
     wbs_path = session_root / "ride.wbs"
     wbs_path.write_text(
         json.dumps(

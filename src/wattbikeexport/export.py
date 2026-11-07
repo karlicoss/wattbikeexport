@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import json
-import re
+import secrets
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -12,139 +14,54 @@ from hpikit.json import Json
 from kloggy import get_logger
 
 from ._http import CsrfParser, HttpClient
-from .common import (
-    safe_file_name,
-    session_directory_name,
-    session_files,
-)
+from .common import session_metadata, workout_directory_name, workout_files
 
 logger = get_logger(__name__)
 
-_API_URL = "https://api.wattbike.com/v2"
-_AUTH_URL = "https://auth.wattbike.com/login"
+_API_URL = "https://v2.api.wattbike.com/v1"
+_AUTH_URL = "https://auth.wattbike.com"
 
 # These identifiers are embedded in Wattbike Hub's browser code.
-# They select the public OAuth and Parse clients and are not account secrets.
-_AUTH_CLIENT_ID = "2o35ocqkd3i7al5umvie51dc99"
-_AUTH_REDIRECT_URI = "https://hub.wattbike.com/cauth/callback"
-_APPLICATION_ID = "Gopo4QrWEmTWefKMXjlT6GAN4JqafpvD"
-_JAVASCRIPT_KEY = "p1$h@M10Tkzw#"
-
-
-def _parse_datetime(value: str) -> str:
-    """
-    Normalize an ISO date or datetime to the UTC format expected by Parse.
-
-    Date-only and timezone-naive values are interpreted as UTC.
-    Timezone-aware values are converted to UTC.
-    """
-    parsed = datetime.fromisoformat(value)
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    else:
-        parsed = parsed.astimezone(UTC)
-    return parsed.isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-def _date_pointer(value: str) -> Json:
-    return {"__type": "Date", "iso": value}
-
-
-def _assert_unchanged_metadata(*, path: Path, session: Json) -> None:
-    if not path.exists():
-        return
-    existing = json.loads(path.read_text())
-    assert existing == session, (path, existing, session)
-
-
-def _write_json(path: Path, value: Any) -> None:
-    path.write_text(json.dumps(value, indent=2, ensure_ascii=False))
-
-
-def _wbss_time_range(name: str) -> tuple[int, int] | None:
-    match = re.fullmatch(r".+_(\d+)-(\d+)\.wbss", name)
-    if match is None:
-        return None
-    return int(match.group(1)), int(match.group(2))
-
-
-def _has_empty_lap_wbss_quirk(session: Json) -> bool:
-    session_data = session.get("sessionData")
-    if not isinstance(session_data, dict):
-        return False
-    wbss = session_data.get("wbss")
-    if not isinstance(wbss, list) or len(wbss) != 2:
-        return False
-
-    ranges = []
-    for item in wbss:
-        if not isinstance(item, dict):
-            return False
-        name = item.get("name")
-        if not isinstance(name, str):
-            return False
-        time_range = _wbss_time_range(name)
-        if time_range is None:
-            return False
-        ranges.append(time_range)
-
-    empty_ranges = [time_range for time_range in ranges if time_range[0] == time_range[1]]
-    real_ranges = [time_range for time_range in ranges if time_range[0] < time_range[1]]
-    return len(empty_ranges) == 1 and real_ranges == [(0, empty_ranges[0][0])]
-
-
-def _build_session_where(
-    *,
-    user_id: str,
-    after: str | None = None,
-    before: str | None = None,
-) -> Json:
-    where: Json = {
-        "user": {
-            "__type": "Pointer",
-            "className": "_User",
-            "objectId": user_id,
-        }
-    }
-    bounds: Json = {}
-    if after is not None:
-        bounds["$gte"] = _date_pointer(after)
-    if before is not None:
-        bounds["$lt"] = _date_pointer(before)
-    if len(bounds) > 0:
-        where["startDate"] = bounds
-    return where
+# They select the public OAuth client and are not account secrets.
+_AUTH_CLIENT_ID = "1dbc8ki8qvla56e899t03bjl9p"
+_AUTH_REDIRECT_URI = "https://v2.hub.wattbike.com/auth-callback"
 
 
 class WattbikeClient(HttpClient):
     def __init__(self, *, email: str, password: str) -> None:
+        super().__init__()
         self.email = email
         self.password = password
-        super().__init__()
-        self.parse_headers = {
-            "X-Parse-Application-Id": _APPLICATION_ID,
-            "X-Parse-Javascript-Key": _JAVASCRIPT_KEY,
-        }
-        self.user: Json | None = None
+        self.headers = {"Content-Type": "application/json", "X-App-Version": "5.1.0+5917058"}
 
     def authenticate(self) -> None:
-        params = {
-            "client_id": _AUTH_CLIENT_ID,
-            "response_type": "token",
-            "scope": "email openid",
-            "redirect_uri": _AUTH_REDIRECT_URI,
-        }
-        login_page = self.request("GET", _AUTH_URL, params=params, timeout=30)
+        state = secrets.token_urlsafe(32)
+        verifier = secrets.token_urlsafe(32)
+        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+        login_page = self.request(
+            "GET",
+            f"{_AUTH_URL}/oauth2/authorize",
+            params={
+                "response_type": "code",
+                "client_id": _AUTH_CLIENT_ID,
+                "redirect_uri": _AUTH_REDIRECT_URI,
+                "scope": "openid",
+                "state": state,
+                "code_challenge": challenge,
+                "code_challenge_method": "S256",
+                "audience": "https://interactivestrength-cloud",
+            },
+            timeout=30,
+        )
         login_page.raise_for_status()
-
+        assert urlsplit(login_page.url).scheme == "https"
+        assert urlsplit(login_page.url).netloc == "auth.wattbike.com"
         parser = CsrfParser()
         parser.feed(login_page.text)
         assert parser.token is not None
-
-        login_response = self.request(
+        login = self.request(
             "POST",
-            _AUTH_URL,
-            params=params,
+            login_page.url,
             data={
                 "_csrf": parser.token,
                 "username": self.email,
@@ -155,116 +72,78 @@ class WattbikeClient(HttpClient):
             allow_redirects=False,
             timeout=30,
         )
-        assert login_response.is_redirect, login_response.status_code
-
-        location = login_response.headers["Location"]
-        fragment = parse_qs(urlsplit(location).fragment)
-        id_token = fragment["id_token"][0]
-
-        exchange_response = self.request(
-            "GET",
-            f"{_API_URL}/custom/session",
-            headers=self.parse_headers | {"Authorization": f"Bearer {id_token}"},
+        assert login.is_redirect, login.status_code
+        location = urlsplit(login.headers["Location"])
+        assert location._replace(query="", fragment="").geturl() == _AUTH_REDIRECT_URI
+        query = parse_qs(location.query)
+        assert query["state"] == [state]
+        token = self.request(
+            "POST",
+            f"{_AUTH_URL}/oauth2/token",
+            data={
+                "grant_type": "authorization_code",
+                "client_id": _AUTH_CLIENT_ID,
+                "code": query["code"][0],
+                "redirect_uri": _AUTH_REDIRECT_URI,
+                "code_verifier": verifier,
+            },
             timeout=30,
         )
-        exchange_response.raise_for_status()
-        session_token = exchange_response.json()["token"]
-        self.parse_headers["X-Parse-Session-Token"] = session_token
+        token.raise_for_status()
+        self.headers["Authorization"] = f"Bearer {token.json()['access_token']}"
 
-    def get_profile(self) -> Json:
-        profile_response = self.request(
-            "GET",
-            f"{_API_URL}/users/me",
-            headers=self.parse_headers,
-            timeout=30,
-        )
-        profile_response.raise_for_status()
-        self.user = profile_response.json()
-        self.user.pop("sessionToken", None)
-        return self.user
-
-    def list_sessions(
-        self,
-        *,
-        after: str | None = None,
-        before: str | None = None,
-        page_size: int = 100,
-    ) -> list[Json]:
-        assert self.user is not None
-        assert page_size > 0, page_size
-        where = _build_session_where(
-            user_id=self.user["objectId"],
-            after=after,
-            before=before,
-        )
-        sessions = []
-        skip = 0
-
-        while True:
-            response = self.request(
-                "GET",
-                f"{_API_URL}/classes/RideSession",
-                headers=self.parse_headers,
-                params={
-                    "where": json.dumps(where, separators=(",", ":")),
-                    "order": "startDate,objectId",
-                    # Wattbike Hub includes these fields in its RideSession query.
-                    # Parse expands the pointers, preserving their data in sessions.json.
-                    "include": "sessionSummary,userPerformanceState,training",
-                    "limit": page_size,
-                    "skip": skip,
-                },
-                timeout=60,
-            )
-            response.raise_for_status()
-            page = response.json()["results"]
-            sessions.extend(page)
-            if len(page) < page_size:
-                break
-            skip += len(page)
-
-        object_ids = [session["objectId"] for session in sessions]
-        assert len(object_ids) == len(set(object_ids)), object_ids
-        return sessions
-
-    def get_object(self, pointer: Json) -> Json:
-        assert pointer["__type"] == "Pointer", pointer
-        class_name = pointer["className"]
-        object_id = pointer["objectId"]
-        assert isinstance(class_name, str), class_name
-        assert isinstance(object_id, str), object_id
-        assert re.fullmatch(r"[A-Za-z0-9_]+", class_name), class_name
-        assert re.fullmatch(r"[A-Za-z0-9_-]+", object_id), object_id
+    def get(self, endpoint: str, *, params: dict[str, Any] | None = None) -> Json:
         response = self.request(
             "GET",
-            f"{_API_URL}/classes/{class_name}/{object_id}",
-            headers=self.parse_headers,
-            timeout=30,
+            f"{_API_URL}/{endpoint}",
+            headers=self.headers,
+            params={"flatDescriptions": 1} | ({} if params is None else params),
+            timeout=60,
         )
         response.raise_for_status()
         value = response.json()
-        assert isinstance(value, dict), value
+        assert isinstance(value, dict), type(value)
         return value
 
-    def get_profile_objects(self) -> dict[str, Json]:
-        assert self.user is not None
-        objects = {}
-        for field, pointer in self.user.items():
-            if isinstance(pointer, dict) and pointer.get("__type") == "Pointer":
-                objects[field] = self.get_object(pointer)
-        return objects
+    def list_workouts(self, *, page_size: int = 100) -> list[Json]:
+        assert page_size > 0, page_size
+        workouts = []
+        page = 1
+        while True:
+            result = self.get(
+                "workouts/me",
+                params={
+                    "join": ["class", "class.hotspots", "workoutWb", "device"],
+                    "sort": ["startDate,ASC", "id,ASC"],
+                    "page": page,
+                    "limit": page_size,
+                },
+            )
+            assert result["page"] == page, result["page"]
+            workouts.extend(result["data"])
+            if page >= result["pageCount"]:
+                break
+            assert len(result["data"]) > 0
+            page += 1
+        ids = [workout["id"] for workout in workouts]
+        assert len(ids) == len(set(ids)) == result["total"], (len(ids), result["total"])
+        return workouts
 
-    def download(
-        self,
-        *,
-        source_name: str,
-        destination: Path,
-    ) -> bool:
-        return self.download_file(
-            url=f"{_API_URL}/files/{quote(source_name, safe='')}",
-            destination=destination,
-            headers=self.parse_headers,
-        )
+    def download(self, *, asset_id: str, destination: Path) -> None:
+        if destination.exists():
+            return
+        result = self.get(f"assets/{quote(asset_id, safe='')}/download")
+        url = result["url"]
+        assert urlsplit(url).scheme == "https"
+        # The signed storage URL authenticates the download itself.
+        # Keep the API bearer token out of storage requests.
+        self.download_file(url=url, destination=destination, headers={})
+
+
+def _write_json(path: Path, value: Any) -> None:
+    temporary = path.with_name(f"{path.name}.tmp")
+    temporary.write_text(json.dumps(value, indent=2, ensure_ascii=False))
+    temporary.replace(path)
 
 
 def export_account(
@@ -275,54 +154,87 @@ def export_account(
     before: str | None = None,
 ) -> None:
     client.authenticate()
-    profile = client.get_profile()
-    profile_objects = client.get_profile_objects()
-    sessions = client.list_sessions(
-        after=after,
-        before=before,
-    )
+    profile = client.get("users/me", params={"join": "profileImageAsset"})
+    profile_path = output_directory / "profile.json"
+    legacy_profile_bytes = None
+    if profile_path.exists():
+        previous_profile_bytes = profile_path.read_bytes()
+        previous_profile = json.loads(previous_profile_bytes)
+        is_v2_api = "objectId" not in previous_profile
+        if is_v2_api:
+            assert profile["user"]["id"] == previous_profile["user"]["id"], "Archive belongs to a different account"
+        else:
+            assert profile["user"]["wbParseId"] == previous_profile["objectId"], (
+                "Archive belongs to a different account"
+            )
+            legacy_profile_bytes = previous_profile_bytes
 
-    for session in sessions:
-        session_directory = output_directory / "sessions" / session_directory_name(session)
-        _assert_unchanged_metadata(
-            path=session_directory / "metadata.json",
-            session=session,
-        )
+    legacy_ids = set()
+    current_ids = set()
+    for _directory, session in session_metadata(output_directory):
+        is_v2_api = "objectId" not in session
+        if is_v2_api:
+            current_ids.add(session["id"])
+        else:
+            legacy_ids.add(session["objectId"])
+    workouts = client.list_workouts()
+    lower = None if after is None else datetime.fromisoformat(after)
+    upper = None if before is None else datetime.fromisoformat(before)
+    workouts = [
+        workout
+        for workout in workouts
+        if (lower is None or datetime.fromisoformat(workout["startDate"]) >= lower)
+        and (upper is None or datetime.fromisoformat(workout["startDate"]) < upper)
+    ]
+    logger.info(f"Found {len(workouts)} workouts")
+    for index, workout in enumerate(workouts, start=1):
+        if workout["id"] in current_ids or workout["legacyId"] in legacy_ids:
+            logger.info(f"[{index}/{len(workouts)}] {workout['startDate']} (already archived)")
+            continue
+        if workout["status"] != "complete":
+            logger.info(f"[{index}/{len(workouts)}] {workout['startDate']} (not complete yet)")
+            continue
+        directory = output_directory / "sessions" / workout_directory_name(workout)
+        assert not directory.exists(), directory
+        staging = output_directory / ".partial" / directory.name
+        staging.mkdir(parents=True, exist_ok=True)
+        files = workout_files(workout)
+        assert any(extension == "wbs" for extension, _asset_id, _name in files), workout["id"]
+        logger.info(f"[{index}/{len(workouts)}] {workout['startDate']} ({len(files)} files)")
+        for _extension, asset_id, name in files:
+            client.download(asset_id=asset_id, destination=staging / name)
+        # Publish the complete directory once, leaving archived sessions untouched on later runs.
+        _write_json(staging / "metadata.json", workout)
+        directory.parent.mkdir(parents=True, exist_ok=True)
+        staging.rename(directory)
 
     output_directory.mkdir(parents=True, exist_ok=True)
-    _write_json(output_directory / "profile.json", profile)
-    _write_json(output_directory / "profile-objects.json", profile_objects)
-    _write_json(output_directory / "sessions.json", sessions)
+    if legacy_profile_bytes is not None:
+        legacy_profile_path = output_directory / "legacy" / "profile.json"
+        if not legacy_profile_path.exists():
+            legacy_profile_path.parent.mkdir(exist_ok=True)
+            temporary = legacy_profile_path.with_name(f"{legacy_profile_path.name}.tmp")
+            temporary.write_bytes(legacy_profile_bytes)
+            temporary.replace(legacy_profile_path)
+    _write_json(profile_path, profile)
+    # Keep the latest API listing separately from the immutable session metadata.
+    _write_json(output_directory / "workouts.json", workouts)
+    logger.info(f"Archive written to {output_directory.resolve()}")
 
-    logger.info(f"Found {len(sessions)} sessions")
-    for index, session in enumerate(sessions, start=1):
-        session_directory = output_directory / "sessions" / session_directory_name(session)
-        metadata_path = session_directory / "metadata.json"
-        existing = metadata_path.exists()
-        if not existing:
-            session_directory.mkdir(parents=True, exist_ok=True)
-            _write_json(metadata_path, session)
-        files = session_files(session)
-        status = "existing" if existing else "new"
-        logger.info(
-            f"[{index}/{len(sessions)}] {session['startDate']['iso']} "
-            f"{session.get('title', 'Untitled')} "
-            f"({status}, {len(files)} files)"
-        )
 
-        for _field, source_name in files:
-            # Filenames come from Wattbike metadata and must stay in this session.
-            destination = session_directory / safe_file_name(source_name)
-            downloaded = client.download(
-                source_name=source_name,
-                destination=destination,
-            )
-            if downloaded is False:
-                assert source_name.endswith(".wbss"), source_name
-                # Wattbike can advertise WBSS for a two-lap session where the
-                # second lap is zero-duration, but not generate either segment.
-                assert _has_empty_lap_wbss_quirk(session), (session["objectId"], source_name)
-                logger.info(f"missing {source_name} (404; empty-lap WBSS quirk)")
+def _parse_datetime(value: str) -> str:
+    """
+    Normalize an ISO date or datetime to UTC.
+
+    Date-only and timezone-naive values are interpreted as UTC.
+    Timezone-aware values are converted to UTC.
+    """
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    else:
+        parsed = parsed.astimezone(UTC)
+    return parsed.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _make_parser() -> argparse.ArgumentParser:
@@ -354,21 +266,15 @@ def _make_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = _make_parser().parse_args()
-    secrets = json.loads(args.secrets.read_text())
-    assert set(secrets) >= {"email", "password"}, sorted(secrets)
+    credentials = json.loads(args.secrets.read_text())
+    assert set(credentials) >= {"email", "password"}, sorted(credentials)
     assert not (args.after is not None and args.before is not None and args.after >= args.before)
-
-    client = WattbikeClient(
-        email=secrets["email"],
-        password=secrets["password"],
-    )
     export_account(
-        client=client,
+        client=WattbikeClient(email=credentials["email"], password=credentials["password"]),
         output_directory=args.output,
         after=args.after,
         before=args.before,
     )
-    logger.info(f"Archive written to {args.output.resolve()}")
 
 
 if __name__ == "__main__":
