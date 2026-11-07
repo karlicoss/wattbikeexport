@@ -69,12 +69,12 @@ class HttpClient:
             time.sleep(_retry_delay(response, attempt))
         raise AssertionError
 
-    def download_file(self, *, url: str, destination: Path, headers: dict[str, str]) -> bool:
+    def download_file(self, *, url: str, destination: Path, headers: dict[str, str]) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_name(f"{destination.name}.part")
 
         if destination.exists():
-            return True
+            return
 
         offset = temporary.stat().st_size if temporary.exists() else 0
         headers = dict(headers)
@@ -89,9 +89,6 @@ class HttpClient:
             stream=True,
             timeout=(30, 120),
         )
-        if response.status_code == 404:
-            return False
-
         # 416 means the saved partial file already reaches the server's EOF.
         if response.status_code == 416:
             assert offset > 0, offset
@@ -106,4 +103,3 @@ class HttpClient:
                         output.write(chunk)
 
         temporary.replace(destination)
-        return True

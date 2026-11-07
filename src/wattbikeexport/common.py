@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
-from hpikit.json import Json
+from hpikit.json import Json, loads
+
+
+def session_metadata(root: Path) -> Iterator[tuple[Path, Json]]:
+    for path in sorted((root / "sessions").glob("*/metadata.json")):
+        value = loads(path.read_bytes())
+        assert isinstance(value, dict), path
+        yield path.parent, value
 
 
 def session_files(session: Json) -> list[tuple[str, str]]:
@@ -40,9 +49,20 @@ def safe_file_name(name: str) -> str:
     return name
 
 
-def session_directory_name(session: Json) -> str:
-    """Return a stable, sortable directory name for a Wattbike session."""
-    start_date = session["startDate"]["iso"]
-    assert isinstance(start_date, str), start_date
-    timestamp = start_date.replace("-", "").replace(":", "").replace(".000", "")
-    return f"{timestamp}_{session['objectId']}"
+def workout_directory_name(workout: Json) -> str:
+    timestamp = workout["startDate"].replace("-", "").replace(":", "").replace(".000", "")
+    return safe_file_name(f"{timestamp}_{safe_file_name(workout['id'])}")
+
+
+def workout_files(workout: Json) -> list[tuple[str, str, str]]:
+    """Return (format, asset ID, archive filename) for a new API workout."""
+    files = []
+    for field, asset_id in workout["workoutWb"]["assets"].items():
+        if asset_id is None:
+            continue
+        assert field.endswith("FileId"), field
+        assert isinstance(asset_id, str), asset_id
+        extension = safe_file_name(field.removesuffix("FileId").lower())
+        name = f"{safe_file_name(asset_id)}.{extension}"
+        files.append((extension, asset_id, name))
+    return files

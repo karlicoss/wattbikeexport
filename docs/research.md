@@ -1,6 +1,8 @@
 # Wattbike export research
 
-Research checked on 18 June 2026.
+Historical research on the legacy Hub, checked on 18 June 2026.
+The exporter now uses the current Hub at `v2.hub.wattbike.com` and its API at `v2.api.wattbike.com/v1`.
+See the [README](../README.md) for the current export workflow.
 
 ## Supported session export
 
@@ -48,10 +50,10 @@ A suitable request is:
 See the [Wattbike privacy policy](https://wattbike.com/policies/privacy-policy),
 last updated 28 May 2026.
 
-## Bulk export through the Hub API
+## Bulk export through the legacy Hub API
 
-Wattbike does not publish a supported API, but the Hub uses an undocumented
-API at `https://api.wattbike.com/v2`. The current web flow:
+The legacy Hub used an undocumented API at `https://api.wattbike.com/v2`.
+Its web flow:
 
 1. signs in through the Cognito hosted UI at `auth.wattbike.com`;
 2. exchanges the returned Cognito ID token at `/v2/custom/session`;
