@@ -78,6 +78,7 @@ class HttpClient:
 
         offset = temporary.stat().st_size if temporary.exists() else 0
         headers = dict(headers)
+        headers["Accept-Encoding"] = "identity"
         if offset > 0:
             headers["Range"] = f"bytes={offset}-"
 
@@ -97,6 +98,10 @@ class HttpClient:
         else:
             response.raise_for_status()
             append = offset > 0 and response.status_code == 206
+            if append:
+                assert response.headers["Content-Range"].startswith(f"bytes {offset}-"), response.headers[
+                    "Content-Range"
+                ]
             with temporary.open("ab" if append else "wb") as output:
                 for chunk in response.iter_content(chunk_size=1024 * 1024):
                     if len(chunk) > 0:
